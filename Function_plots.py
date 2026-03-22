@@ -1,51 +1,66 @@
-from Wave_eqn_functions import green_wave_fan, shock_wave, combined_wave_front
+from Wave_eqn_functions import green_wave_fan, variable_shockwave, variable_dissipation_curve
+import numpy as np
+import matplotlib.pyplot as plt
+#--------------------------------------------------------------------
+# VARIABLES 
+rho_initial = 0.52      # Density approaching Light 1 (0 to 1)
+num_fan_segments = 1000 # Resolution of the traffic flow fan out of the first light
 
-#-----define variables-------------
-'''maths uses dimensionless quantities so careful with units
-velocity and density are defined as fractions of the total velocity and density'''
+# Light 1 
+pos_L1 = 0  # x-position of light
+t_red_start_L1 = 0 # Start of first red cycle
+t_red_dur_L1 = 5   # Duration of red
+t_green_start_L1 = t_red_start_L1 + t_red_dur_L1 #when it turns green
 
-#universal variables: --------------
-rho_initial = 0.3 # initial density entering the system, i.e. approaching the first set of lights
-
-#traffic light set 1 variables: ---------------
-position_of_1 = 4 # position of the first set of traffic lights
-t_RL_interval_1 = 5 # time between when the red light hits
-t_RL_length_1 = 1 # time that the light is red for
-'''time when the green light occurs, is defined as the the time the redlight occurs at plus one interval of time
-defines as the RL_length (redlight length)'''
-
-#traffic light set 2: --------------
-position_of_2 = 4 # position of the second set of traffic lights
-t_RL_interval_2 = 5 # time between when the red light hits
-t_RL_length_2 = 1 # time that the light is red for
-'''time when the green light occurs, is defined as the the time the redlight occurs at plus one interval of time
-defines as the RL_length (redlight length)'''
-
-#----------------------------------
+# Light 2 
+pos_L2 = 30  # x-position of light
+t_red_start_L2 = 25  # When light 2 turns red
+t_red_dur_L2 = 15  # How long Light 2 stays red
+t_green_start_L2 = t_red_start_L2 + t_red_dur_L2 # when it turns green
+#--------------------------------------------------------------------
 
 
-#-----function combination---------
-#assuming we start from the beginning of the first light then the functions are plotted as such
+#-------------------------------------------------------------------
+#how to use the functions
 
-#first traffic light:
-red_light_start_times_1 = []
-for i in range(0,6):
-    red_light_start_times_1.append(0+i*(t_RL_interval_1+t_RL_length_1))#takes the position of the first light and iterates over it for multiples cycles to find the times of the red lights
-    # the next redlight occurs after one red light length plus the red gap. 
+#Generate the "Arrival Traffic" from Light 1
+# This creates the fan of varying densities that will hit the next light.
+fan1_data = green_wave_fan(
+    rho_in = rho_initial, 
+    t_start = t_green_start_L1, 
+    D = pos_L1, 
+    n = num_fan_segments
+)
+# a shockwave function also exist for use but this is all that is needed for the second light
 
-#now, using the redlight start times the end times can then be found by simply adding one redlight length to each
-red_light_end_times_1 = red_light_start_times_1 + t_RL_length_1
+# Input the fan data and Light 2's red timing.
+# This returns the linear segments of the shockwave moving UPSTREAM.
+shock_segments = variable_shockwave(
+    rho_in = rho_initial, 
+    fan_eqs = fan1_data, 
+    D2 = pos_L2, 
+    t_RL2 = t_red_start_L2, 
+    d_RL2 = t_red_dur_L2
+)
+#this MUST come before the use of the next function
 
-#we now have two lists, one of when each redlight begins, and when each redlight ends
-#the linear shock function needs to be found between the first arm of the green light fan and the redlight start time. 
-#to find this use the 
-
-
-#second traffic light:
-red_light_start_times_2 = []
-for i in range(0,6):
-    red_light_start_times_2.append(0+i*(t_RL_interval_2+t_RL_length_2))#takes the position of the first light and iterates over it for multiples cycles to find the times of the red lights
-    # the next redlight occurs after one red light length plus the red gap. 
-
-#now, using the redlight start times the end times can then be found by simply adding one redlight length to each
-red_light_end_times_2 = red_light_start_times_1 + t_RL_length_2
+# Input the end of the red shock and the fan data again.
+# This returns the curved dissipation line when the two green lights and shockwave interact
+dissipation_points = variable_dissipation_curve(
+    shock_segments = shock_segments, 
+    fan1_equations = fan1_data, 
+    D2 = pos_L2, 
+    t_RL2 = t_red_start_L2, 
+    d_RL2 = t_red_dur_L2
+)
+#function higherarchy:
+#[green_wave_fan]  <- depends only on input variables/constants stated up top
+#       |
+#       +----> [variable_shockwave]  <- depends on fan1 data and the stuff uptop
+#       |               |          
+#       +---------------+----> [variable_dissipation_curve]  <- depends on the shockwave output and fan 1
+#                                                               and the values stated uptop
+#[shock_wave_linear] <- shock wave func for the simple case i.e. first light where it is just linear
+#
+#[combined_wave_front] <- like with the linear shockwave this is the simple constant density curve case
+#--------------------------------------------------------------------------
