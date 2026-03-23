@@ -1,5 +1,7 @@
 import numpy as np
-
+'''edited back end functions, should hopefully work now but the inputs have changed.
+ I have done my best and I think it works fine. it is currently 21:30. the best I can do is this. An assumption we make is going to have to be that
+ the previous shockwave from a previous redlight at the second set of lights does cannot affect the next red light. its my best effort.'''
 #---------------red region/linear shock wave bit---------------
 
 def shock_wave_linear(t,rho_in,D,t_RL):
@@ -22,100 +24,165 @@ def shock_wave_linear(t,rho_in,D,t_RL):
 
     return x_SW
 
-def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2):
-    '''
-    This function is for the second light and recalculates the shockwave everytime it hits a fan arm as s
-    changes with the incoming traffic density.
+def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2 , D1, t_RL1):
+    """
+    Inputs:
+    rho_initial[constant]- density entering the system as a whole 
+    D2[constant]- position of second traffic light in system
+    t_RL2[list]- a list of times for when each successive redlight occurs at L2
+    d_RL2[constant]- length of a redlight at L2
+    D1[constant]- position of the first light in the system
+    t_RL1[list]- list of timings for the red lights in time
+    """
+    shock_waves_L2 = []
+    for i in range(len(t_RL2)):
 
-    Input Variables:
-    fan1_equations - the gradient and intercept of the initial green fan arms from the first light
-    rho_initial - the density of the initial traffic when it hits the second light,
-    this is variable as it could be traffic that missed the first light or traffic that hit the first light, it depends.
+        #this section is the setup, does the shock hit a previous wave from the last L1 light
+        #or does it have free road and miss the last fan
+        m_diss = -1.0  # Signal travels backwards into the queue
+        t_GL2 = t_RL2[i] + d_RL2
+        # t = mx + c  =>  c = t - mx
+        c_diss = t_GL2 - (m_diss * D2)
+        t_current_RL2 = t_RL2[i]
+        idx_above = np.searchsorted(t_RL1, t_current_RL2)
+
+        if idx_above >= len(fan1_equations):
+            idx_above = len(fan1_equations) - 1
+        found_hit = False
+        valid_fan_arms = []
+        for offset in [1,2,3]:
+            search_idx = idx_above - offset
+            if search_idx < 0: continue
+            temp_fan = [arm for arm in fan1_equations[search_idx] if arm[0] > 0]
+            if not temp_fan: continue
+            # Arrival times of THIS temporary fan at D2
+            # Arrival = m * D2 + c
+            arrival_start = temp_fan[0][0] * D2 + temp_fan[0][1]
+            m_gap = 1 / ((1 - 2 * rho_initial)+1e-9)
+            c_gap = t_RL1[search_idx] - (m_gap * D1)
+            arrival_end = m_gap * D2 + c_gap
+
+            if arrival_start <= t_current_RL2 <= arrival_end:
+                # Calculate starting density
+                cross_times = [arm[0] * D2 + arm[1] for arm in temp_fan]
+                arm_idx = np.searchsorted(cross_times, t_current_RL2) - 1
+
+                m_start = temp_fan[arm_idx][0]
+                rho_start = (1 - 1/m_start) / 2
+                current_s = -rho_start
+                valid_fan_arms = [[arm[0], arm[1], 0] for arm in temp_fan[arm_idx+1:]]
+                m_gap = 1 / ((1 - 2 * rho_initial)+1e-9)
+                c_gap = t_RL1[search_idx] - (m_gap * D1)
+                valid_fan_arms.append([m_gap, c_gap, 1])
+
+                for follow_idx in range(search_idx + 1, len(fan1_equations)):
+                    if follow_idx >= len(fan1_equations): 
+                        break
+                    f_plume = [arm for arm in fan1_equations[follow_idx] if arm[0] > 0]
+                    # Add future plume with flag 0
+                    valid_fan_arms.extend([[p[0], p[1], 0] for p in f_plume])
+                    
+                    # Add future gap with flag 1
+                    c_f_gap = t_RL1[follow_idx] - (m_gap * D1)
+                    valid_fan_arms.append([m_gap, c_f_gap, 1])
+                
+                found_hit = True
+                break
+
+        if not found_hit:
+            current_s = -rho_initial
+            for follow_idx in range(idx_above, idx_above + 2):
+                if follow_idx >= len(fan1_equations): break
+                
+                f_plume = [arm for arm in fan1_equations[follow_idx] if arm[0] > 0]
+                valid_fan_arms.extend([[p[0], p[1], 0] for p in f_plume])
+                
+
+                m_gap = 1 / ((1 - 2 * rho_initial)+1e-9)
+                c_f_gap = t_RL1[follow_idx] - (m_gap * D1)
+                valid_fan_arms.append([m_gap, c_f_gap, 1])
 
 
-    Input constants:
-    D2 - the position of the second traffic light in x
-    t_RL2 - time of the second red light. 
-    d_RL2 - length of the second red light, i.e. how long after t_RL2 does the greenlight occur.
+        t_current = t_RL2[i]#start of second red light
+        x_current = D2# position of red light
+        t_GL2 = t_RL2[i] + d_RL2#time when the light turns green,
+        shock_segments = []
+        arm_index = 0
+        active = True
 
-    '''
-    t_current = t_RL2#start the clock at t_current for the second red light
-    x_current = D2# position in space where we start the clock for the second red light
-    t_GL2 = t_RL2 + d_RL2#time when the light turns green, i.e. the new fan starts
-    shock_path = [[x_current, t_current]]#a list to store x and y points of the back of the queue
-    current_s = -rho_initial # defines intial gradient for the shock wave
-    #so it can be plotted later
-    
-    # Filter for positive gradients (v_char > 0) 
-    # This keeps arms that move forward in x and t.
-    valid_fan_arms = [arm for arm in fan1_equations if arm[0] >= 0]
-
-    # First arm of the second green fan (The Dissipation Signal)
-    first_arm_second_green_gradient = -1
-    first_arm_second_green_intercept = t_GL2 - (first_arm_second_green_gradient*D2)
-    
-
-    shock_segments = []
-    arm_index = 0
-    active = True
-
-    while active and arm_index < len(valid_fan_arms):
-        m_fan, c_fan = valid_fan_arms[arm_index]
-        if current_s == 0:
-            # The shockwave is a vertical line: x = x_current
-            # Solves for where the fan arm t = m_fan * x + c_fan hits this x
-            x_fan_int = x_current
-            t_fan_int = m_fan * x_fan_int + c_fan
-            
-            # Solve for where the dissipation signal hits this x
-            # t = m_diss * x + c_diss
-            x_diss = x_current
-            t_diss = first_arm_second_green_gradient * x_diss + first_arm_second_green_intercept
-            
-            # Since s=0, the segment doesn't have a standard m_shock/c_shock
-            # We can use a very large number for m_shock to represent 'vertical'
-            m_shock = -1e12 
-            c_shock = t_current - (m_shock * x_current)
-        else:
-            # --- Your existing Linear Math ---
-            m_shock = 1 / current_s
-            c_shock = t_current - (m_shock * x_current)
-            
-            x_fan_int = (c_fan - c_shock) / (m_shock - m_fan)
-            t_fan_int = m_shock * x_fan_int + c_shock
-            
-            x_diss = (first_arm_second_green_intercept - c_shock) / (m_shock - first_arm_second_green_gradient)
-            t_diss = m_shock * x_diss + c_shock
-            if t_fan_int <= t_current + 1e-6: t_fan_int = float('inf')
-            if t_diss <= t_current + 1e-6: t_diss = float('inf')
-
-
-        if t_diss <= t_fan_int:
-            # The green signal from L2 is the SOONEST event. 
-            # Record final segment and BREAK.
-            shock_segments.append([m_shock, c_shock, t_current, t_diss, x_current, x_diss])
-            active = False
-        else:
-            # The Fan 1 arm is hit first. Record this segment.
-            shock_segments.append([m_shock, c_shock, t_current, t_fan_int, x_current, x_fan_int])
-            
-            # Update starting point for the next segment
-            x_current = x_fan_int
-            t_current = t_fan_int
-            
-            # Reverse engineer density from the arm after the one just hit
-            if arm_index + 1 < len(valid_fan_arms):
-                next_m_fan, _ = valid_fan_arms[arm_index + 1]
-                # rho = (1 - 1/m) / 2
-                new_rho = (1 - (1 / next_m_fan)) / 2
+        while active:
+            if arm_index < len(valid_fan_arms):
+                m_target, c_target, is_gap = valid_fan_arms[arm_index]
             else:
-                # If no more arms, use the density of the current arm
-                new_rho = (1 - (1 / m_fan)) / 2
+                # If no more traffic is hitting the queue, it must dissipate or stop growing
+                active = False
+                break
+            if abs(current_s) < 1e-12:
+                # Shockwave is vertical (waiting at light or road is empty)
+                x_fan_int, t_fan_int = x_current, m_target * x_current + c_target
+                x_diss_int, t_diss_int = x_current, m_diss * x_current + c_diss
+                m_shock_val = -1e12
+            else:
+                # Shockwave is diagonal (moving through traffic)
+                m_shock = 1 / current_s
+                c_shock = t_current - (m_shock * x_current)
+                m_shock_val = m_shock
+                
+                # Intersection with next plume/gap arm
+                x_fan_int = (c_target - c_shock) / (m_shock - m_target)
+                t_fan_int = m_target * x_fan_int + c_target
+                
+                # Intersection with dissipation wave
+                x_diss_int = (c_diss - c_shock) / (m_shock - m_diss)
+                t_diss_int = m_shock * x_diss_int + c_shock
             
-            current_s = -new_rho
-            arm_index += 1
+            t_clearing_here = m_diss * x_current + c_diss
+            if t_current >= t_clearing_here - 1e-7:
+                active = False
+                break
 
-    return np.array(shock_segments)
+            # 2. UPDATED: The 'Hit' Logic
+            # Check if we hit the green fan BEFORE we hit the next traffic plume
+            # AND ensure the hit happens in the future.
+            if t_diss_int <= t_fan_int + 1e-7 and t_diss_int > t_current:
+                # HIT THE L2 FAN - STOP HERE
+                shock_segments.append([m_shock_val, t_current, t_diss_int, x_current, x_diss_int])
+                active = False
+            elif t_fan_int > t_current:
+                shock_segments.append([m_shock_val, t_current, t_fan_int, x_current, x_fan_int])
+                
+                # 2. UPDATE the "current" position to the intersection point
+                x_current, t_current = x_fan_int, t_fan_int
+                
+                # 3. UPDATE DENSITY (The "Curve" Logic)
+                # We use the arm we JUST hit to determine the density behind the shockwave now
+                if is_gap == 1:
+                    # No more cars; shockwave becomes vertical (infinite slope)
+                    current_s = 0 
+                else:
+                    # Calculate new density from the target arm's slope
+                    # rho = (1 - 1/m) / 2
+                    new_rho = (1 - (1 / m_target)) / 2
+                    current_s = -new_rho
+                
+                # 4. MOVE to the next arm for the next loop iteration
+                arm_index += 1
+            else:
+                # Safety: If t_fan_int is in the past, move to the next plume arm
+                arm_index += 1
+                
+                arm_index += 1
+        shock_waves_L2.append(shock_segments)
+        # --- DIAGNOSTIC PRINT ---
+        if i >-1 :  # Only check the 3rd cycle (t=90-110 in your plot) to avoid spam
+            print(f"--- Segment Debug (Cycle {i}) ---")
+            print(f"Current Pos: x={x_current:.2f}, t={t_current:.2f}")
+            print(f"Shock Slope: {m_shock:.2f}")
+            print(f"Target Arm: m={m_target:.2f}, c={c_target:.2f}, IsGap={is_gap}")
+            print(f"Calculated Fan Int: x={x_fan_int:.2f}, t={t_fan_int:.2f}")
+            print(f"Calculated Diss Int: x={x_diss_int:.2f}, t={t_diss_int:.2f}")
+    return shock_waves_L2
+
 
 
 
@@ -134,7 +201,7 @@ def green_wave_fan(rho_in, t_G1, D, number_of_segements_of_fan):
     rho_in - the initial traffic density
     
     Input constants:
-    t_G1 - time when the gren light begins i.e. fan origin
+    t_G1 - list of times when the gren light begins for L1 i.e. fan origins
     number_of_segments_of_fan - literally how many arms do you want on the fan
     
     '''
@@ -142,21 +209,24 @@ def green_wave_fan(rho_in, t_G1, D, number_of_segements_of_fan):
     densities = np.linspace(0,1.0, number_of_segements_of_fan)
     
     fan_equations = []
-    
-    for rho_f in densities:
-        # Characteristic speed in dimensionless units
-        v_char = 1 - 2 * rho_f
-        
-        # Avoid true division by zero for the vertical arm
-        if np.abs(v_char) < 1e-10:
-            gradient = 1e12 # Represents a vertical line
-        else:
-            gradient = 1 / v_char
+    fans = []
+    for time in t_G1:
+        for rho_f in densities:
+            # Characteristic speed in dimensionless units
+            v_char = 1 - 2 * rho_f
             
-        intercept = t_G1 - (gradient * D)
-        fan_equations.append([gradient, intercept])
+            # Avoid true division by zero for the vertical arm
+            if np.abs(v_char) < 1e-10:
+                gradient = 1e12 # Represents a vertical line
+            else:
+                gradient = 1 / v_char
+                
+            intercept = time - (gradient * D)
+            fan_equations.append([gradient, intercept])
+        fans.append(fan_equations)
+        fan_equations = []
     
-    return np.array(fan_equations) # Returns an array of lists where each list has a gradient and intercept of that fan line
+    return np.array(fans) # Returns an array of lists where each list has a gradient and intercept of that fan line
 
 
 
@@ -186,99 +256,66 @@ def combined_wave_front(t, rho_in,D,t_RL,t_G):
 
     return x_comb
 
-def variable_dissipation_curve(shock_segments, fan1_equations, D2, t_RL2, d_RL2):
-    '''This function is the worst one as it accounts for how the shockwave decays,
-    depending on the incoming density.
 
-    Input variables:
-    shock_segments - the segments of the 'red' shock wave before it hits the second green fan
-    fan1_equations - the equations for the first fan as a variable density
 
-    Input constants:
-    D2 - position of the second light
-    t_RL2 - time the redlight occurs at
-    d_RL2 - duration of the red light (i.e. the time from red to green)
+def variable_dissipation_curve(all_shock_waves, fan1_equations, D2, t_RL2, d_RL2, rho_initial):
     '''
-    last_seg = shock_segments[-1]#finds the last entry in the list (last point on the red shock wave)
-    t_current, x_current = last_seg[3], last_seg[5] # Point where linear shock hit the green signal
-    t_GL2 = t_RL2 + d_RL2#defines the time when the green light occured
+    all_shock_waves- output from the variable shock wave function
+    fan1_equations- equations for the fans for the origional set of lights
+    D2- position of second light
+    t_RL2- time of the second red light changes(list)
+    d_RL2-duration of second light's red light
+    rho_initial- initial density of the system
+    '''
+    all_curves = []
     
-    valid_fan_arms = sorted(fan1_equations, key=lambda x: x[0])
-    #sorts fans so that the shockwave hits the correct arm on the second fan first
-    
-    # determines which arm the shockwave is currently on
-    distances = [abs((m * x_current + c) - t_current) for m, c in valid_fan_arms]
-    arm_index = distances.index(min(distances))#takes the arm closest to it out of the valid arms
-    
-    curve_points = [[x_current, t_current]]# plots the first set of points as where the red curve ends
+    for i in range(len(t_RL2)):
+        shock_segments = all_shock_waves[i]
+        
 
-    while arm_index < len(valid_fan_arms):
-        m_f, c_f = valid_fan_arms[arm_index]#determines the first arm hit
-        
-        # Updates the incoming density based on the arm from the first traffic light
-        rho_in = (1 - (1 / m_f)) / 2 if abs(m_f) > 1e-6 else 0.5
-        
-        # Recalculates K for this specific segment to maintain continuity
-        # Solves: x_current = D2 + (1-2*rho_in)*(t_current - t_GL2) + K*sqrt(t_current - t_GL2)
-        dt = t_current - t_GL2
-        if dt <= 0: # Safety for points exactly at the green light trigger
-            K = 0   #This is unphysical so shouldnt happen though, its just a safety 'if'
-        else:
-            K = (x_current - D2 - (1 - 2 * rho_in) * dt) / np.sqrt(dt)
-            #calculates k
+        if not shock_segments or len(shock_segments) == 0:
+            all_curves.append(np.array([]))
+            continue 
 
-        # Find the intersection with the next fan arm
-        # Intersection of: x = D2 + (1-2*rho_in)(t-t_GL2) + K*sqrt(t-t_GL2)
-        # and Fan Arm: x = (t - c_f) / m_f
+        end_of_sw = shock_segments[-1]
+        x_start, t_start = end_of_sw[4], end_of_sw[2]
+        t_GL2 = t_RL2[i] + d_RL2
         
-        v_diff = (1 - 2 * rho_in) - (1 / m_f)
-        constant_part = D2 - (c_f / m_f) + (t_GL2 / m_f) - (1 - 2 * rho_in) * t_GL2 # This is simplified
-        
-        # It is easier to solve in terms of u = sqrt(t - t_GL2)
-        # Let u = sqrt(t - t_GL2). Then t = u^2 + t_GL2
-        # (u^2 + t_GL2 - c_f)/m_f = D2 + (1-2*rho_in)u^2 + K*u
-        
-        A = (1 / m_f) - (1 - 2 * rho_in)
-        B = -K
-        C = (t_GL2 - c_f) / m_f - D2
-        
-        discriminant = B**2 - 4 * A * C #discriminant
-        
-        if discriminant < 0 or abs(A) < 1e-12:
-            # If no intersection, this curve segment lasts "forever" or is where it dissipates
-            t_final = t_current + 10
-            # Just add a few points for the plot and exit
-            ts = np.linspace(t_current, t_final, 20)
-            for t in ts[1:]:
-                u = np.sqrt(t - t_GL2)
-                x_t = D2 + (1 - 2 * rho_in) * (t - t_GL2) + K * u
-                curve_points.append([x_t, t])#zooms in and plots 20 final points before it ends
-            break
 
-        # Solve for u, then t_hit
-        u_roots = [(-B + np.sqrt(discriminant)) / (2 * A), (-B - np.sqrt(discriminant)) / (2 * A)]
-        valid_u = [u for u in u_roots if u > np.sqrt(dt) + 1e-6]
-        #1e-6 is a tiny buffer value to prevent errors from rounding
-        #only car about solutions where the time is after the current time
-        if not valid_u:
-            arm_index += 1
-            continue #if it doesnt hit this arm it checks the next
+        locked_rho = rho_initial
+        found_rho = False
+        for cycle_idx in range(len(fan1_equations)):
+            for arm in fan1_equations[cycle_idx]:
+                if t_start <= (arm[0] * x_start + arm[1]) + 0.1:
+                    locked_rho = (1 - (1 / arm[0])) / 2
+                    found_rho = True
+                    break
+            if found_rho: break
+
+
+        dt_init = max(0.1, t_start - t_GL2)
+        K = (x_start - D2 - (1 - 2 * locked_rho) * dt_init) / np.sqrt(dt_init)
+
+
+        t_steps = np.linspace(t_start, t_start + 700, 1000) 
+        curve_points = [[x_start, t_start]]
         
-        t_hit = min(valid_u)**2 + t_GL2
-        x_hit = (t_hit - c_f) / m_f #
-        
-        # Stores points for this segment (Smooths out the curve)
-        segment_ts = np.linspace(t_current, t_hit, 10)
-        for t in segment_ts[1:]:
-            u = np.sqrt(t - t_GL2)
-            x_t = D2 + (1 - 2 * rho_in) * (t - t_GL2) + K * u
-            curve_points.append([x_t, t])
+        for t_curr in t_steps[1:]:
+            dt_now = t_curr - t_GL2
             
-        # Advance to next state/ segment region
-        t_current, x_current = t_hit, x_hit
-        arm_index += 1
-        
-        if x_current >= D2: # Queue cleared, it is cut here as we dont care about after the second light
-            break
 
-    return np.array(curve_points)
+            x_next = D2 + (1 - 2 * locked_rho) * dt_now + K * np.sqrt(dt_now)
+            
+            # Stop when the line crosses Light 2 (D2)
+            if x_next >= D2 - 0.05:
+                curve_points.append([D2, t_curr])
+                break
+                
+            if x_next < -100: 
+                break
+                
+            curve_points.append([x_next, t_curr])
+            
+        all_curves.append(np.array(curve_points))
+        
+    return all_curves
