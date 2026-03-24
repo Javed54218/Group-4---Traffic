@@ -1,228 +1,228 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.collections as mcoll
 from Wave_eqn_functions import green_wave_fan, shock_wave_linear, variable_shockwave
-from Wave_eqn_functions import variable_dissipation_curve, L1_shock_curves
-
+from Wave_eqn_functions import variable_dissipation_curve, L1_shock_curves,get_finite_fan_segments
+from Wave_eqn_functions import get_finite_fan_segments_L2,track_vehicle_full_physics
 # --- 1. USER INPUTS (REAL WORLD UNITS) ---
-V_MAX_REAL = 15.0       # Speed limit in meters per second (m/s)
-RHO_JAM_REAL = 0.12     # Jam density in vehicles per meter (veh/m)
-FLUX_IN = 0.15          # Arrival rate in vehicles per second (veh/s)
+V_MAX_REAL = 13.4      
+RHO_JAM_REAL = 0.22727272727
+FLUX_IN = 0.08        
 
-# Universal variables (Keeping your names)
-no_cycles = 3 
+no_cycles = 10
 
-# Traffic Light Set 1
-position_of_1 = 40.0     # Position in METERS
-t_RL_interval_1 = 40.0   # Time between the start of one red light and the next (SEC)
-t_RL_length_1 = 20.0     # Duration the light stays red (SEC)
+position_of_1 = 40.0     
+t_RL_interval_1 = 60   
+t_RL_length_1 = 30     
 
-# Traffic Light Set 2
-position_of_2 = position_of_1 + 250 
-t_RL_interval_2 = 40.0   
-t_RL_length_2 = 20.0     
-t_offset_2 = 10.0        # Time delay between L1 red and L2 red (SEC)
+position_of_2 = position_of_1 + 250
+t_RL_interval_2 = 60.0   
+t_RL_length_2 = 25.0     
+t_offset_2 = 50.0        
 
 # --- 2. THE CONVERSION CALCULATIONS ---
-
 def get_rho_from_flux(q, v_max, r_max):
-    """Solves the Greenshields quadratic for density."""
     q_max = 0.25 * v_max * r_max
     if q > q_max: q = q_max
-    # Standard quadratic solution for rho (uncongested root)
     disc = v_max**2 - (4 * v_max * q / r_max)
     return ((v_max - np.sqrt(disc)) / (2 * v_max / r_max)) / r_max
 
-# Derived Model Density (Dimensionless fraction 0.0 to 1.0)
 rho_initial = get_rho_from_flux(FLUX_IN, V_MAX_REAL, RHO_JAM_REAL)
 
-# Scaled Positions (Math requires x_model = meters / V_MAX)
-# This ensures the "Free Flow" speed in your math equals 1.0
+# Scaled Positions
 D1 = position_of_1 / V_MAX_REAL
 D2 = position_of_2 / V_MAX_REAL
 
-# Timing Lists (Seconds are fine as the base unit)
-# start_list = when light turns RED
-# end_list = when light turns GREEN (start + red_duration)
-start_list_1 = [i * t_RL_interval_1 for i in range(no_cycles)]
-end_list_1 = [t + t_RL_length_1 for t in start_list_1]
+# Correct Timing Lists (Used by all functions)
+# Note: Adding +1 to range creates the "Ghost Cycle" to terminate the last shockwave
+start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles + 1)])
+end_list_1 = start_list_1 + t_RL_length_1
 
-start_list_2 = [t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles)]]
-end_list_2 = [t + t_RL_length_2 for t in start_list_2]
-#----------------------------------
+start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles + 1)]])
+end_list_2 = start_list_2 + t_RL_length_2
 
-#-----function combination---------
-#assuming we start from the beginning of the first light then the functions are plotted as such
+# --- 3. FUNCTION COMBINATION (REORDERED FOR CLIPPING) ---
+light_1_shock_wave_front = L1_shock_curves(rho_initial, D1, start_list_1, end_list_1, t_RL_interval_1)
 
-red_light_start_times_1 = []
-for i in range(0, no_cycles):
-    red_light_start_times_1.append(0+i*(t_RL_interval_1+t_RL_length_1))#takes the position of the first light and iterates over it for multiples cycles to find the times of the red lights
-    # the next redlight occurs after one red light length plus the red gap.
 
-red_light_start_times_1 = np.array(red_light_start_times_1)#converting to numpy array to use change if needed
-#now, using the redlight start times the end times can then be found by simply adding one redlight length to each
-red_light_end_times_1 = red_light_start_times_1 + t_RL_length_1
+fan1_raw = green_wave_fan(end_list_1, D1, 200) 
 
-#we now have two lists, one of when each redlight begins, and when each redlight ends
+shock_segments = variable_shockwave(rho_initial, fan1_raw, D2, 
+                                       start_list_2, t_RL_length_2, 
+                                       D1, start_list_1)
 
-#second traffic light:
-red_light_start_times_2 = []
-for i in range(0,no_cycles):
-    red_light_start_times_2.append(t_offset_2+i*(t_RL_interval_2+t_RL_length_2))#takes the position of the first light and iterates over it for multiples cycles to find the times of the red lights
-    # the next redlight occurs after one red light length plus the red gap.
+curves_2 = variable_dissipation_curve(shock_segments, fan1_raw, D2, 
+                                       start_list_2, t_RL_length_2, rho_initial)
 
-#now, using the redlight start times the end times can then be found by simply adding one redlight length to each
-red_light_start_times_2 = np.array(red_light_start_times_2) # converting to numpy array
-red_light_end_times_2 = red_light_start_times_2 + t_RL_length_2
+fan1_finite_list = get_finite_fan_segments(
+    fan1_raw, 
+    light_1_shock_wave_front, 
+    D1, 
+    D2,end_list_1,shock_segments,curves_2
+)
+fan2_raw = green_wave_fan(end_list_2, D2, 200)
 
-# --- PRE-CALCULATION FOR PHYSICS ---
-# We need to generate the L1 fan data first so the variable_shockwave can "see" it
+# 2. Get Finite Segments for Light 2
+# This clips the L2 release lines against its own red zones and the incoming L1 traffic
+fan2_finite_list = get_finite_fan_segments_L2(
+    fan2_raw, 
+    shock_segments,        # The L2 shockwaves
+    D2,                    # Start position
+    D2 + 500,              # End position (or D3 if you have a third light)
+    end_list_2,            # Green light timings for L2
+    curves_2,              # The L2 dissipation curves
+    fan1_finite_list       # The already-clipped L1 plumes
+)
 
-light_1_shock_wave_front = L1_shock_curves(rho_initial,position_of_1,red_light_start_times_1,red_light_end_times_1)
+start_times = np.arange(0, 100, 5)
+all_trajectories = []
+curves_1 = []
 
-fan1_data_list = green_wave_fan( red_light_end_times_1, position_of_1, 50)
+for i, cycle_points in enumerate(light_1_shock_wave_front):
+    t_green = end_list_1[i] # When the light turns green for this cycle
+    
+    # Extract only the points that happen AFTER the green light starts
+    # These points represent the 'Dissipation' or 'Clearing' phase
+    release_phase = [pt for pt in cycle_points if pt[1] >= t_green]
+    
+    if release_phase:
+        curves_1.append(release_phase)
+for t_start in start_times:
+    # The call line for the dual-light system
+    traj = track_vehicle_full_physics(
+        t_start=t_start, 
+        v_in_norm=1.0, 
+        D1=D1, 
+        D2=D2, 
+        shock_L1=light_1_shock_wave_front,  # List of L1 shock cycles
+        shock_L2=shock_segments,            # List of L2 shock cycles
+        g_starts_1=end_list_1,              # Timestamps when L1 turns green
+        g_starts_2=end_list_2, r_starts_1 = start_list_1, r_starts_2 =start_list_2,
+        V_MAX_REAL=V_MAX_REAL
+    )
+    all_trajectories.append(traj)
 
-# Calculate the complex shockwave buildup at Light 2
-shock_segments = variable_shockwave(rho_initial, fan1_data_list, position_of_2, 
-                                    red_light_start_times_2, t_RL_length_2, 
-                                    position_of_1, red_light_start_times_1)
+# ---------- Fixed Plotting Functions ----------------
 
-# Generate the smooth dissipation curves (trajectories)
-curves_2 = variable_dissipation_curve(shock_segments, fan1_data_list, position_of_2, 
-                                    red_light_start_times_2, t_RL_length_2, rho_initial)
-
-#----------plotting----------------
-
-def plot_L1_full(l1_curves,position, ax):
-    '''
-    This function just plots the red light, green light and linear wave sections
-    over the time of a red light. It now also plots the dissipating curve after the linear shockwave phase
-    Input variables:
-    shock_function - this is the shock function being plotted, could work with other
-                     equations with some adapting perhaps.
-    Input constants:
-    curves_list- Output from L1_shock_curves
-    start_list- red_light_start_times_1
-    end_list - red_light_end_times_1
-    D1 - position of the first light
-    '''
+def plot_L1_full(l1_curves, position, v_max, ax):
     import matplotlib.collections as mcoll
-
     for p in l1_curves:
-        # 1. Calculate Velocity for coloring (dx/dt)
-        dx = np.diff(p[:, 0])
-        dt = np.diff(p[:, 1])
-        # Avoid division by zero for the vertical 'red light' parts
-        velocities = np.where(dt > 1e-9, dx/dt, 0)
+        # We MUST multiply p[:, 0] by v_max to move it from ~3.0 to 40.0m
+        x_meters = p[:, 0] * v_max
+        t_seconds = p[:, 1]
         
-        # Creates segments using the 'stack' method to avoid the (4,) shape error
-        segments = np.stack([p[:-1], p[1:]], axis=1)
+        # Calculate Velocity (this remains 0 to 1.0)
+        dx = np.diff(x_meters)
+        dt = np.diff(t_seconds)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # Velocity in m/s, then normalized to 0-1 for the colormap
+            v_real = np.where(dt > 1e-9, dx/dt, 0)
+            v_norm = v_real / v_max 
 
-        # Creates and add the collection
+        # Create segments for the color mapped line
+        points = np.array([x_meters, t_seconds]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
         lc = mcoll.LineCollection(segments, cmap='RdYlGn', linewidths=2.5, zorder=4)
-        lc.set_array(velocities)
+        lc.set_array(v_norm)
         lc.set_clim(vmin=0, vmax=1.0)
-        
         ax.add_collection(lc)
 
-    
-
-    ax.axvline(position, color='green', alpha=0.3) # faint green line when green
-    ax.set_xlabel('Position (m)')
-    ax.set_ylabel('Time (s)')
+    ax.axvline(position, color='green', alpha=0.3)
 
 
-def plot_fan(position,end_times, rho_initial, fan_data_list, ax, target_pos):
-    '''
-    This function plots the green wave fan for all green lights now using the edited
-    beckend function which uses a list.
 
-    Input variables:
-    shock_function - just the green wave fan from wave_eqn-functions
-    rho_initial - density goinng into the function
-
-    Input constants:
-    position - position in space of light
-    end_red - time the light stops being red
-    '''
-
-    no_arms = 30 # this is just the number of fan arms, can be altered
-    #unsure when it should end, use 30 sec after for now
-    for end_red, fan in zip(end_times,fan_data_list):
-        # iterates over each arm
-        for arm in fan:
-            gradient = arm[0] # m which is dt/dx
-            intercept = arm[1] # c
-
-            # x = (t - intercept) / gradient
-            #rearrange because green fan gives gradient for flipped axis
-            t_arrival = gradient * target_pos + intercept #edited so it stops the fan at the second light
-            #plot the arms as faint grey lines
-            if t_arrival >= end_red:#only want arms moving forwards in time
-                ax.plot([position, target_pos], [end_red, t_arrival], 
-                        color="gray", alpha=0.1, lw=0.5)
-            #edited the limits so that it plots the fan between the lights
-
-    return fan
-
-def plot_variable_shock(red_light_start_2, red_light_end_2, position_of_2, shock_segments_f):
-        # Plot Light 2 Red Bars and the Variable Shockwaves
+def plot_variable_shock(red_light_start_2, red_light_end_2, position_of_2, shock_segments_f, v_max):
     for i in range(len(red_light_start_2)):
-        ax.vlines(position_of_2, red_light_start_2[i], red_light_end_2[i], colors='red', lw=3)
-        # Plotting each segment of the variable shockwave calculated earlier
-        for seg in shock_segments_f[i]:#gets the shock segments for plotting
+        # shock_segments_f[i] is a list of [m, t_start, t_end, x_start, x_end]
+        for seg in shock_segments_f[i]:
             m_s, t_s, t_e, x_s, x_e = seg
-            ax.plot([x_s, x_e], [t_s, t_e], color='red', lw=2)
-            ax.scatter(x_e, t_e, color='black', s=12, zorder=5) # Show intersection points
-
-
-def plot_variable_dissipation_curve(diss_curves, ax):
+            
+            # 1. Plot the red line segment
+            ax.plot([x_s * v_max, x_e * v_max], [t_s, t_e], color='red', lw=2)
+            
+            '''# 2. Plot black dots at the "kinks" (the start of the segment)
+            # We use zorder=5 to make sure the dots sit on top of the lines
+            ax.plot(x_s * v_max, t_s, 'ko', markersize=3, zorder=5)
+            
+        # Optional: Plot a dot at the very last endpoint of the shockwave
+        if shock_segments_f[i]:
+            last_seg = shock_segments_f[i][-1]
+            ax.plot(last_seg[4] * v_max, last_seg[2], 'ko', markersize=3, zorder=5)'''
+    
+def plot_variable_dissipation_curve(diss_curves, ax, v_max):
     import matplotlib.collections as mcoll
-    '''
-    Takes the list of dissipation boundary values and plots them.
-    '''
     for curve in diss_curves:
-        if len(curve)< 2:#checks if curve has less than 2 points
-            continue
-        p = np.asanyarray(curve)#converts to a numpy array
-        xs, ts = p[:,0], p[:,1]# extraxcts the x and t coordinates as lists
-        dx = np.diff(xs)
-        dt = np.diff(ts)#finds differences in x and t between the points for a velocity calculation
-        velocities = np.where(dt>1e-9,dx/dt,0)
-        segments = np.stack([p[:-1], p[1:]],axis =1)
+        if len(curve) < 2: continue
+        p = np.asanyarray(curve)
+        # Scale X to meters
+        xs_m = p[:, 0] * v_max
+        ts = p[:, 1]
+        
+        dx = np.diff(xs_m)
+        dt = np.diff(ts)
+        v_norm = np.where(dt > 1e-9, (dx/dt)/v_max, 0)
+        
+        points = np.array([xs_m, ts]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         lc = mcoll.LineCollection(segments, cmap='RdYlGn', linewidths=2.5, zorder=4)
-        #uses mulcticolored to create segments.
+        lc.set_array(v_norm)
+        lc.set_clim(vmin=0, vmax=1.0)
+        ax.add_collection(lc)
 
-        lc.set_array(velocities)#sets colour based off of velocities
-        lc.set_clim(vmin=0, vmax=1.0) #sets velocity limits as max and min of 0 and 1
-        
-        ax.add_collection(lc)#adds the segments to the plot
 
-        #plots black dots to show some points every 40th change
-        ax.scatter(xs[::40], ts[::40], color='black', s=4, zorder=5)
-
-#-----main plotting code------------------
+# ----- Updated main plotting calls ------------------
 fig, ax = plt.subplots(figsize=(11, 8))
+# Plotting the vehicle paths in a distinct color (Yellow or White)
+for traj in all_trajectories:
+    # Scale x (index 0) by V_MAX_REAL, keep t (index 1) as is
+    ax.plot(traj[:, 0] * V_MAX_REAL, traj[:, 1], 
+            color='yellow', linewidth=1.2, alpha=0.8, zorder=10)
 
-# Plot Light 1 full wave and red,light periods
-plot_L1_full(light_1_shock_wave_front,position_of_1, ax)
 
-# Plot fans from L1 to L2 for all cycles
-plot_fan(position_of_1,red_light_end_times_1, rho_initial, fan1_data_list, ax, position_of_2)
+# 1. Plot Light 1
+plot_L1_full(light_1_shock_wave_front, position_of_1, V_MAX_REAL, ax)
 
-#plots variable shock waves for second light
-plot_variable_shock(red_light_start_times_2, red_light_end_times_2, position_of_2, shock_segments)
+for cycle in fan1_finite_list:
+    for x1, t1, x2, t2 in cycle:
+        # Scale dimensionless x-coordinates to real meters
+        x1_m = x1 * V_MAX_REAL
+        x2_m = x2 * V_MAX_REAL
+        
+        # Plot using the scaled meters for X and raw seconds for T
+        ax.plot([x1_m, x2_m], [t1, t2], 
+                color='green', 
+                alpha=1, 
+                linewidth=0.5, 
+                zorder=1)
+for cycle in fan2_finite_list:
+    for x1, t1, x2, t2 in cycle:
+        # Scale dimensionless x to real meters
+        ax.plot([x1 * V_MAX_REAL, x2 * V_MAX_REAL], [t1, t2], 
+                color='cyan', alpha=0.6, linewidth=0.7, zorder=1)
 
-#plots the variable dissipation for the second light
-plot_variable_dissipation_curve(curves_2,ax)
+# 3. Plot variable shock (Added V_MAX_REAL)
+plot_variable_shock(start_list_2, end_list_2, position_of_2, shock_segments, V_MAX_REAL)
 
-# Final Formatting
-ax.axvline(position_of_1, color='green', alpha=0.3) 
-ax.set_xlabel('Position (x)')
-ax.set_ylabel('Time (t)')#no units yet as waiting on dimensional work 
-ax.set_title(f'Integrated Traffic Flow: Offset = {t_offset_2}')
-ax.set_xlim(position_of_1 - 30, position_of_2 + 10)#x and y limits
-ax.set_ylim(0, red_light_end_times_2[-1] + 50)#sets y limit
-plt.grid(True, alpha=0.2)#adds a grid
+# 4. Plot dissipation (Added V_MAX_REAL)
+plot_variable_dissipation_curve(curves_2, ax, V_MAX_REAL)
+
+# ... (Formatting remains the same)
+
+# --- Final Formatting ---
+# Vertical lines to show where the traffic lights are physically located
+ax.axvline(position_of_1, color='green', alpha=0.5, label='Light 1') 
+ax.axvline(position_of_2, color='green', alpha=0.5, linestyle='--', label='Light 2')
+
+ax.set_xlabel('Position (meters)')
+ax.set_ylabel('Time (seconds)')
+ax.set_title(f'Integrated Traffic Flow: Offset = {t_offset_2}s')
+
+# x and y limits based on your real-world meters and total time
+ax.set_xlim(position_of_1 - 50, position_of_2 + 10)
+ax.set_ylim(0, end_list_2[-1] + 20)
+
+plt.legend(loc='upper right')
+plt.grid(True, alpha=0.2)
+plt.tight_layout()
 plt.show()
