@@ -106,11 +106,12 @@ def plot_fan(position, end_red, rho_initial,
     no_arms = 100 # this is just the number of fan arms, can be altered
     time = np.linspace(end_red, (end_red + 30)) # creates a time array over green
     #unsure when it should end, use 30 sec after for now
-    fan = shock_function(rho_initial,
-                         end_red,
+    fan_list = shock_function(rho_initial,
+                         [end_red],
                          position,
                          no_arms
                          )
+    fan = fan_list[0]
     # iterates over each arm
     for i in range(len(fan)):
         gradient = fan[i][0]

@@ -173,14 +173,7 @@ def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2 , D1, t_RL1
                 
                 arm_index += 1
         shock_waves_L2.append(shock_segments)
-        # --- DIAGNOSTIC PRINT ---
-        if i >-1 :  # Only check the 3rd cycle (t=90-110 in your plot) to avoid spam
-            print(f"--- Segment Debug (Cycle {i}) ---")
-            print(f"Current Pos: x={x_current:.2f}, t={t_current:.2f}")
-            print(f"Shock Slope: {m_shock:.2f}")
-            print(f"Target Arm: m={m_target:.2f}, c={c_target:.2f}, IsGap={is_gap}")
-            print(f"Calculated Fan Int: x={x_fan_int:.2f}, t={t_fan_int:.2f}")
-            print(f"Calculated Diss Int: x={x_diss_int:.2f}, t={t_diss_int:.2f}")
+
     return shock_waves_L2
 
 
@@ -189,7 +182,7 @@ def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2 , D1, t_RL1
 #----------greenwave fan bit-------------------
 
 
-def green_wave_fan(rho_in, t_G1, D, number_of_segements_of_fan):
+def green_wave_fan( t_G1, D, number_of_segements_of_fan):
     '''
     This function plots the greenwave fan, this should only be applied to the data once the vehicles
     have passed the initial wavefront.
@@ -226,7 +219,7 @@ def green_wave_fan(rho_in, t_G1, D, number_of_segements_of_fan):
         fans.append(fan_equations)
         fan_equations = []
     
-    return np.array(fans) # Returns an array of lists where each list has a gradient and intercept of that fan line
+    return fans # Returns an array of lists where each list has a gradient and intercept of that fan line
 
 
 
@@ -315,7 +308,73 @@ def variable_dissipation_curve(all_shock_waves, fan1_equations, D2, t_RL2, d_RL2
                 break
                 
             curve_points.append([x_next, t_curr])
+        
+        all_curves.append(curve_points)
+    return all_curves
+
+#----full light 1 boundary function------
+def L1_shock_curves(rho_in, D1, start_list, end_list, t_max_limit=140):
+    all_curves = []
+    s = -rho_in # shock velocity
+    
+    for i in range(len(start_list)):
+        t_RL = start_list[i]
+        t_G = end_list[i]
+        
+        '''#Determines the "Cutoff Time" (the start of the next red light)
+        if i + 1 < len(start_list):
+            t_stop = start_list[i+1]
+        else:
+            t_stop = t_max_limit # For the final cycle'''
             
-        all_curves.append(np.array(curve_points))
+        #Finds the transition time (when shock meets fan)
+        t_hit = t_G + (s * (t_RL - t_G)) / (1 + s)
+        
+        # If the next red light happens before the curve can start, skip/limit
+        if t_hit > t_stop:
+            t_hit = t_stop
+
+        # Creates the Linear segment (from plot_linear logic)
+        t_lin = np.linspace(t_RL, t_hit, 20)
+        x_lin = s * (t_lin - t_RL) + D1
+        
+        #Creates the Curved segment (from combined_wave_front logic)
+        # combined_wave_front should be imported or defined in your script
+        t_cur = np.linspace(t_hit, t_stop, 100)
+        x_cur = combined_wave_front(t_cur, rho_in, D1, t_RL, t_G)
+
+        if i + 1 < len(start_list):
+            t_RL_next = start_list[i+1]
+            # Next shockwave position
+            x_next_shock = (-rho_in) * (t_cur - t_RL_next) + D1
+            
+            # 1. Add a small 'spatial buffer' (e.g., -2) 
+            # This allows the curve to exist slightly behind the 'math' point 
+            # before it gets officially truncated.
+            collision_mask = x_cur <= (x_next_shock - 2) 
+            
+            # 2. Only look for collisions AFTER the light turns green
+            time_mask = t_cur > (t_G + 1)
+            # Place this right after defining collision_mask
+            print(f"Cycle {i} | t_G: {t_G:.1f} | First x_cur: {x_cur[0]:.2f} | Next shock at that time: {x_next_shock[0]:.2f} | Collision? {collision_mask[0]}")
+            final_mask = collision_mask & time_mask
+            if np.any(final_mask):
+                stop_idx = np.where(final_mask)[0][0]
+                t_cur = t_cur[:stop_idx]
+                x_cur = x_cur[:stop_idx]
+        
+        #Joins them into a single trajectory
+        full_x = np.concatenate([x_lin, x_cur])
+        full_t = np.concatenate([t_lin, t_cur])
+        
+        all_curves.append(np.column_stack([full_x, full_t]))
+
+        '''if len(t_cur) > 0 and x_cur[-1] < D1:
+            # Physical meaning: The intersection is saturated.
+            # Increase the density for the NEXT cycle because traffic is backed up.
+            current_rho = min(0.9, current_rho + 0.1) 
+        else:
+            # It cleared! Reset to initial density.
+            current_rho = rho_in'''
         
     return all_curves
