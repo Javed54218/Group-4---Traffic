@@ -749,55 +749,66 @@ def find_intercept_all_cycles(v_car, x0, t0, all_shocks):
 def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g_starts_1, g_starts_2, r_starts_1, r_starts_2, V_MAX_REAL):
     curr_x, curr_t = 0.0, t_start
     path = [[curr_x, curr_t]]
-    dt = 0.2
     is_stopped = False
 
-    while curr_x < (D2 + 50/V_MAX_REAL) and curr_t < 700:
-        # 1. SELECT LIGHT ZONE
-        if curr_x < (D1 + D2)/2:
-            shocks, g_starts, r_starts, pos = shock_L1, g_starts_1, r_starts_1, D1
-        else:
-            shocks, g_starts, r_starts, pos = shock_L2, g_starts_2, r_starts_2, D2
+    # We only care about two main goals: Light 1 and Light 2
+    for pos, shocks, g_starts, r_starts in [(D1, shock_L1, g_starts_1, r_starts_1), 
+                                            (D2, shock_L2, g_starts_2, r_starts_2)]:
+        
+        # --- 1. JUMP TO INTERACTION ZONE ---
+        # If far from the light, calculate the time to get 100m away and just JUMP there.
+        dist_to_zone = (pos - 100) - curr_x
+        if dist_to_zone > 0:
+            jump_dt = dist_to_zone / v_in_norm
+            curr_x += dist_to_zone
+            curr_t += jump_dt
+            path.append([curr_x, curr_t])
 
-        # 2. CHECK FAN VELOCITY
-        active_tg = get_active_tg(curr_t, g_starts)
-        v_fan = get_fan_velocity(curr_x, curr_t, active_tg, pos, v_in_norm)
+        # --- 2. THE INTERACTION LOOP (High Detail) ---
+        # We only run a high-detail loop when we are actually near the light/queue
+        dt = 0.5 
+        while curr_x < (pos + 10) and curr_t < 700:
+            # A. IF STOPPED: Wait for Green Fan
+            if is_stopped:
+                active_tg = get_active_tg(curr_t, g_starts)
+                v_fan = get_fan_velocity(curr_x, curr_t, active_tg, pos, v_in_norm)
+                if v_fan > 0.05:
+                    is_stopped = False
+                else:
+                    curr_t += dt
+                    path.append([curr_x, curr_t])
+                    continue
 
-        # 3. STOPPED LOGIC
-        if is_stopped:
-            if v_fan > 0.05: # Threshold for release
-                is_stopped = False
-            else:
-                curr_t += dt
+            # B. CHECK FOR SHOCKWAVE (The expensive part)
+            # Only check every 2 seconds of 'future' to save CPU
+            t_hit, x_hit = find_intercept_single(v_in_norm, curr_x, curr_t, shocks)
+            if t_hit and curr_t < t_hit <= (curr_t + dt + 1e-3):
+                curr_x, curr_t = x_hit, t_hit
+                is_stopped = True
                 path.append([curr_x, curr_t])
                 continue
 
-        # 4. ENHANCED COLLISION CHECK
-        # We must flatten the shocks list or search all cycles to avoid "cycle gaps"
-        t_hit, x_hit = find_intercept_all_cycles(v_in_norm, curr_x, curr_t, shocks)
-        
-        # Check for intersection within this time step
-        if t_hit and curr_t <= t_hit <= curr_t + dt:
-            curr_x, curr_t = x_hit, t_hit
+            # C. CHECK FOR STOP LINE
+            next_x = curr_x + v_in_norm * dt
+            if curr_x < pos <= next_x:
+                is_red = any(rs <= curr_t < gs for rs, gs in zip(r_starts, g_starts))
+                if is_red:
+                    curr_t += (pos - curr_x) / v_in_norm
+                    curr_x = pos
+                    is_stopped = True
+                    path.append([curr_x, curr_t])
+                    continue
+
+            # D. MOVE
+            # Follow fan if in the zone, otherwise full speed
+            active_tg = get_active_tg(curr_t, g_starts)
+            v_move = get_fan_velocity(curr_x, curr_t, active_tg, pos, v_in_norm) if (pos <= curr_x <= pos + 50) else v_in_norm
+            curr_x += v_move * dt
+            curr_t += dt
             path.append([curr_x, curr_t])
-            is_stopped = True
-            continue
 
-        # 5. GHOSTING PROTECTION (The "Emergency Brake")
-        # If no shockwave was found, but the light is red and we are at the line:
-        is_red = any(rs <= curr_t < gs for rs, gs in zip(r_starts, g_starts))
-        if is_red and (pos - v_in_norm * dt) <= curr_x <= pos:
-            curr_x = pos # Snap to the light
-            path.append([curr_x, curr_t])
-            is_stopped = True
-            continue
-
-        # 6. MOVEMENT
-        v_limit = v_fan if (active_tg and curr_x <= pos) else v_in_norm
-        v_move = min(v_in_norm, v_limit)
-
-        curr_x += v_move * dt
-        curr_t += dt
-        path.append([curr_x, curr_t])
-            
+            # Break the mini-loop if we've cleared this light's influence
+            if curr_x > pos + 50:
+                break
+                
     return np.array(path)
