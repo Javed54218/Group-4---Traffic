@@ -8,7 +8,7 @@ V_MAX_REAL = 13.4
 RHO_JAM_REAL = 0.22727272727
 FLUX_IN = 0.08        
 
-no_cycles = 10
+no_cycles = 1
 
 position_of_1 = 40.0     
 t_RL_interval_1 = 60   
@@ -34,17 +34,17 @@ D2 = position_of_2 / V_MAX_REAL
 
 # Correct Timing Lists (Used by all functions)
 # Note: Adding +1 to range creates the "Ghost Cycle" to terminate the last shockwave
-start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles + 1)])
+start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles)])
 end_list_1 = start_list_1 + t_RL_length_1
 
-start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles + 1)]])
+start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles)]])
 end_list_2 = start_list_2 + t_RL_length_2
 
 # --- 3. FUNCTION COMBINATION (REORDERED FOR CLIPPING) ---
 light_1_shock_wave_front = L1_shock_curves(rho_initial, D1, start_list_1, end_list_1, t_RL_interval_1)
 
 
-fan1_raw = green_wave_fan(end_list_1, D1, 200) 
+fan1_raw = green_wave_fan(end_list_1, D1, 25,rho_initial) 
 
 shock_segments = variable_shockwave(rho_initial, fan1_raw, D2, 
                                        start_list_2, t_RL_length_2, 
@@ -59,7 +59,7 @@ fan1_finite_list = get_finite_fan_segments(
     D1, 
     D2,end_list_1,shock_segments,curves_2
 )
-fan2_raw = green_wave_fan(end_list_2, D2, 200)
+fan2_raw = green_wave_fan(end_list_2, D2, 200,rho_initial)
 
 # 2. Get Finite Segments for Light 2
 # This clips the L2 release lines against its own red zones and the incoming L1 traffic
@@ -73,7 +73,7 @@ fan2_finite_list = get_finite_fan_segments_L2(
     fan1_finite_list       # The already-clipped L1 plumes
 )
 
-start_times = np.arange(0, 100, 5)
+start_times = np.arange(0, 60, 1)
 all_trajectories = []
 curves_1 = []
 
@@ -224,5 +224,156 @@ ax.set_ylim(0, end_list_2[-1] + 20)
 
 plt.legend(loc='upper right')
 plt.grid(True, alpha=0.2)
+plt.tight_layout()
+plt.show()
+
+
+def run_model_for_offset(t_offset_2, start_times,dt):
+    # --- parameters ---
+    V_MAX_REAL = 13.4
+    RHO_JAM_REAL = 0.22727272727
+    FLUX_IN = 0.08
+
+    no_cycles = 10
+
+    position_of_1 = 40.0
+    t_RL_interval_1 = 60
+    t_RL_length_1 = 30
+
+    position_of_2 = position_of_1 + 250
+    t_RL_interval_2 = 60.0
+    t_RL_length_2 = 25.0
+
+    def get_rho_from_flux(q, v_max, r_max):
+        q_max = 0.25 * v_max * r_max
+        if q > q_max:
+            q = q_max
+        disc = v_max**2 - (4 * v_max * q / r_max)
+        return ((v_max - np.sqrt(disc)) / (2 * v_max / r_max)) / r_max
+
+    rho_initial = get_rho_from_flux(FLUX_IN, V_MAX_REAL, RHO_JAM_REAL)
+
+    D1 = position_of_1 / V_MAX_REAL
+    D2 = position_of_2 / V_MAX_REAL
+
+    start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles + 1)])
+    end_list_1 = start_list_1 + t_RL_length_1
+
+    start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles + 1)]])
+    end_list_2 = start_list_2 + t_RL_length_2
+
+    light_1_shock_wave_front = L1_shock_curves(rho_initial, D1, start_list_1, end_list_1, t_RL_interval_1)
+
+    fan1_raw = green_wave_fan(end_list_1, D1, 20, rho_initial)
+
+    shock_segments = variable_shockwave(
+        rho_initial, fan1_raw, D2,
+        start_list_2, t_RL_length_2,
+        D1, start_list_1
+    )
+
+    curves_2 = variable_dissipation_curve(
+        shock_segments, fan1_raw, D2,
+        start_list_2, t_RL_length_2, rho_initial
+    )
+
+    all_trajectories = []
+    for t_start in start_times:
+        traj = track_vehicle_full_physics(
+            t_start=t_start,
+            v_in_norm=1.0,
+            D1=D1,
+            D2=D2,
+            shock_L1=light_1_shock_wave_front,
+            shock_L2=shock_segments,
+            g_starts_1=end_list_1,
+            g_starts_2=end_list_2,
+            r_starts_1=start_list_1,
+            r_starts_2=start_list_2,
+            V_MAX_REAL=V_MAX_REAL,
+            dt = dt)
+        all_trajectories.append(traj)
+
+    return all_trajectories, D2, V_MAX_REAL
+
+def compute_delays(all_trajectories, start_times, D2, extra_distance=50/13.4):
+    delays = []
+    travel_times = []
+
+    x_target = D2 + extra_distance   # normalized position, 50 m past light 2
+
+    free_flow_time = x_target / 1.0  # because v_in_norm = 1
+
+    for traj, t_start in zip(all_trajectories, start_times):
+        if traj is None or len(traj) < 2:
+            continue
+
+        xs = traj[:, 0]
+        ts = traj[:, 1]
+
+        if np.max(xs) < x_target:
+            continue
+
+        t_arrival = np.interp(x_target, xs, ts)
+        travel_time = t_arrival - t_start
+        delay = travel_time - free_flow_time
+
+        travel_times.append(travel_time)
+        delays.append(delay)
+
+    if len(delays) == 0:
+        return None, None
+
+    return np.mean(travel_times), np.mean(delays)
+def run_offset_and_measure(offset, start_times, dt):
+    all_trajectories, D2, V_MAX_REAL = run_model_for_offset(offset, start_times, dt=dt)
+    mean_tt, mean_delay = compute_delays(all_trajectories, start_times, D2)
+    return mean_delay,mean_tt
+dt_values = [0.5, 0.25, 0.1]
+offsets = np.arange(0, 61, 2)
+start_times = [0, 10, 20, 30, 40, 50, 60, 70, 80]
+
+valid_offsets = []
+mean_delays = []
+error_bars = []
+
+for offset in offsets:
+    vals = []
+
+    for dt in dt_values:
+        d = run_offset_and_measure(offset, start_times, dt)
+        if d is not None:
+            vals.append(d)
+
+    if len(vals) == 0:
+        print(f"Offset = {offset:>2} s | No valid trajectories")
+        continue
+
+    vals = np.array(vals, dtype=float)
+    mean_delay = np.mean(vals)
+    error_bar = 0.5 * (np.max(vals) - np.min(vals))
+
+    valid_offsets.append(offset)
+    mean_delays.append(mean_delay)
+    error_bars.append(error_bar)
+
+    print(f"Offset = {offset:>2} s | Mean delay = {mean_delay:.2f} s | Error = ±{error_bar:.2f} s")
+plt.figure(figsize=(9, 5))
+plt.errorbar(offsets, mean_delays, yerr=error_bars, fmt='o-', capsize=3)
+plt.xlabel("Offset at Light 2 (s)")
+plt.ylabel("Mean delay (s)")
+plt.title("Effect of signal offset on mean vehicle delay")
+plt.grid(True, alpha=0.3)
+
+# Highlight minimum
+idx_min = np.argmin(mean_delays)
+plt.plot(offsets[idx_min], mean_delays[idx_min], 'ro')
+plt.annotate(
+    f"Minimum ≈ {offsets[idx_min]} s",
+    (offsets[idx_min], mean_delays[idx_min]),
+    xytext=(8, 8),
+    textcoords="offset points"
+)
+
 plt.tight_layout()
 plt.show()
