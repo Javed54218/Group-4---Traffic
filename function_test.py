@@ -8,11 +8,7 @@ V_MAX_REAL = 13.4
 RHO_JAM_REAL = 0.22727272727
 FLUX_IN = 0.189       
 
-<<<<<<< HEAD
 no_cycles = 2
-=======
-no_cycles = 1
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 
 position_of_1 = 40.0     
 t_RL_interval_1 = 43   
@@ -38,17 +34,10 @@ D2 = position_of_2 / V_MAX_REAL
 
 # Correct Timing Lists (Used by all functions)
 # Note: Adding +1 to range creates the "Ghost Cycle" to terminate the last shockwave
-<<<<<<< HEAD
 start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles+1)])
 end_list_1 = start_list_1 + t_RL_length_1
 
 start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles+1)]])
-=======
-start_list_1 = np.array([i * t_RL_interval_1 for i in range(no_cycles)])
-end_list_1 = start_list_1 + t_RL_length_1
-
-start_list_2 = np.array([t + t_offset_2 for t in [i * t_RL_interval_2 for i in range(no_cycles)]])
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 end_list_2 = start_list_2 + t_RL_length_2
 
 # --- 3. FUNCTION COMBINATION (REORDERED FOR CLIPPING) ---
@@ -84,11 +73,7 @@ fan2_finite_list = get_finite_fan_segments_L2(
     fan1_finite_list       # The already-clipped L1 plumes
 )
 
-<<<<<<< HEAD
 start_times = np.arange(0, 60, 15)
-=======
-start_times = np.arange(0, 60, 1)
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 all_trajectories = []
 curves_1 = []
 
@@ -343,7 +328,6 @@ def compute_delays(all_trajectories, start_times, D2, extra_distance=50/13.4):
 def run_offset_and_measure(offset, start_times, dt):
     all_trajectories, D2, V_MAX_REAL = run_model_for_offset(offset, start_times, dt=dt)
     mean_tt, mean_delay = compute_delays(all_trajectories, start_times, D2)
-<<<<<<< HEAD
 
     if mean_delay is None:
         return None
@@ -358,12 +342,6 @@ start_sets = [
 ]
 
 dt = 0.5
-=======
-    return mean_delay,mean_tt
-dt_values = [0.5, 0.25, 0.1]
-offsets = np.arange(0, 61, 2)
-start_times = [0, 10, 20, 30, 40, 50, 60, 70, 80]
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 
 valid_offsets = []
 mean_delays = []
@@ -372,40 +350,24 @@ error_bars = []
 for offset in offsets:
     vals = []
 
-<<<<<<< HEAD
     for starts in start_sets:
         d = run_offset_and_measure(offset, starts, dt)
         if d is not None:
             vals.append(float(d))
-=======
-    for dt in dt_values:
-        d = run_offset_and_measure(offset, start_times, dt)
-        if d is not None:
-            vals.append(d)
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 
     if len(vals) == 0:
         print(f"Offset = {offset:>2} s | No valid trajectories")
         continue
 
     vals = np.array(vals, dtype=float)
-<<<<<<< HEAD
     mean_delay = float(np.mean(vals))
     error_bar = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
-=======
-    mean_delay = np.mean(vals)
-    error_bar = 0.5 * (np.max(vals) - np.min(vals))
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 
     valid_offsets.append(offset)
     mean_delays.append(mean_delay)
     error_bars.append(error_bar)
 
-<<<<<<< HEAD
     print(f"Offset = {offset:>2} s | vals = {vals} | Mean delay = {mean_delay:.2f} s | Error = ±{error_bar:.2f} s")
-=======
-    print(f"Offset = {offset:>2} s | Mean delay = {mean_delay:.2f} s | Error = ±{error_bar:.2f} s")
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 plt.figure(figsize=(9, 5))
 plt.errorbar(offsets, mean_delays, yerr=error_bars, fmt='o-', capsize=3)
 plt.xlabel("Offset at Light 2 (s)")
@@ -416,17 +378,8 @@ plt.grid(True, alpha=0.3)
 # Highlight minimum
 idx_min = np.argmin(mean_delays)
 plt.plot(offsets[idx_min], mean_delays[idx_min], 'ro')
-<<<<<<< HEAD
 print(
     f"Minimum ≈ {offsets[idx_min]} s")
-=======
-plt.annotate(
-    f"Minimum ≈ {offsets[idx_min]} s",
-    (offsets[idx_min], mean_delays[idx_min]),
-    xytext=(8, 8),
-    textcoords="offset points"
-)
->>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
 
 plt.tight_layout()
 plt.show()
