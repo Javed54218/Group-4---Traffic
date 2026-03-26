@@ -145,68 +145,78 @@ def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2 , D1, t_RL1
         shock_segments = []
         arm_index = 0
         active = True
-
+        if i + 1 < len(t_RL2):
+            t_cycle_cap = t_RL2[i + 1]
+        else:
+            t_cycle_cap = np.inf
         while active:
             if arm_index < len(valid_fan_arms):
                 m_target, c_target, is_gap = valid_fan_arms[arm_index]
             else:
-                # If no more traffic is hitting the queue, it must dissipate or stop growing
                 active = False
                 break
+
             if abs(current_s) < 1e-12:
-                # Shockwave is vertical (waiting at light or road is empty)
                 x_fan_int, t_fan_int = x_current, m_target * x_current + c_target
                 x_diss_int, t_diss_int = x_current, m_diss * x_current + c_diss
                 m_shock_val = -1e12
             else:
-                # Shockwave is diagonal (moving through traffic)
                 m_shock = 1 / current_s
                 c_shock = t_current - (m_shock * x_current)
                 m_shock_val = m_shock
-                
-                # Intersection with next plume/gap arm
+
                 x_fan_int = (c_target - c_shock) / (m_shock - m_target)
                 t_fan_int = m_target * x_fan_int + c_target
-                
-                # Intersection with dissipation wave
+
                 x_diss_int = (c_diss - c_shock) / (m_shock - m_diss)
                 t_diss_int = m_shock * x_diss_int + c_shock
-            
+
             t_clearing_here = m_diss * x_current + c_diss
             if t_current >= t_clearing_here - 1e-7:
                 active = False
                 break
 
-            # 2. UPDATED: The 'Hit' Logic
-            # Check if we hit the green fan BEFORE we hit the next traffic plume
-            # AND ensure the hit happens in the future.
-            if t_diss_int <= t_fan_int + 1e-7 and t_diss_int > t_current:
-                # HIT THE L2 FAN - STOP HERE
-                shock_segments.append([m_shock_val, t_current, t_diss_int, x_current, x_diss_int])
+            # Ignore "hits" that are not in the future
+            if t_fan_int <= t_current + 1e-9:
+                t_fan_int = np.inf
+            if t_diss_int <= t_current + 1e-9:
+                t_diss_int = np.inf
+
+            # Third boundary: the next L2 cycle start
+            t_next = min(t_fan_int, t_diss_int, t_cycle_cap)
+
+            if t_next == np.inf:
                 active = False
-            elif t_fan_int > t_current:
-                shock_segments.append([m_shock_val, t_current, t_fan_int, x_current, x_fan_int])
-                
-                # 2. UPDATE the "current" position to the intersection point
-                x_current, t_current = x_fan_int, t_fan_int
-                
-                # 3. UPDATE DENSITY (The "Curve" Logic)
-                # We use the arm we JUST hit to determine the density behind the shockwave now
-                if is_gap == 1:
-                    # No more cars; shockwave becomes vertical (infinite slope)
-                    current_s = 0 
-                else:
-                    # Calculate new density from the target arm's slope
-                    # rho = (1 - 1/m) / 2
-                    new_rho = (1 - (1 / m_target)) / 2
-                    current_s = -new_rho
-                
-                # 4. MOVE to the next arm for the next loop iteration
-                arm_index += 1
+                break
+
+            # Find corresponding x at t_next
+            if abs(current_s) < 1e-12:
+                x_next = x_current
             else:
-                # Safety: If t_fan_int is in the past, move to the next plume arm
-                arm_index += 1
-                
+                x_next = x_current + (t_next - t_current) / m_shock_val
+
+            shock_segments.append([m_shock_val, t_current, t_next, x_current, x_next])
+
+            # Case 1: capped by next L2 cycle -> stop this cycle completely
+            if abs(t_next - t_cycle_cap) < 1e-7:
+                active = False
+                break
+
+            # Case 2: hit dissipation -> stop this cycle
+            if abs(t_next - t_diss_int) < 1e-7:
+                active = False
+                break
+
+            # Case 3: hit next plume/gap arm -> continue with updated state
+            x_current, t_current = x_next, t_next
+
+            if is_gap == 1:
+                current_s = 0
+            else:
+                new_rho = (1 - (1 / m_target)) / 2
+                current_s = -new_rho
+
+            arm_index += 1
         shock_waves_L2.append(shock_segments)
 
     return shock_waves_L2
@@ -217,7 +227,7 @@ def variable_shockwave(rho_initial, fan1_equations, D2, t_RL2, d_RL2 , D1, t_RL1
 #----------greenwave fan bit-------------------
 
 
-def green_wave_fan( t_G1, D, number_of_segements_of_fan):
+def green_wave_fan( t_G1, D, number_of_segements_of_fan,rho_initial):
     '''
     This function plots the greenwave fan, this should only be applied to the data once the vehicles
     have passed the initial wavefront.
@@ -234,7 +244,7 @@ def green_wave_fan( t_G1, D, number_of_segements_of_fan):
     
     '''
     # The fan covers densities from 0 (front) to rho_initial (back)
-    densities = np.linspace(0,1.0, number_of_segements_of_fan)
+    densities = np.linspace(0,rho_initial, number_of_segements_of_fan)
     
     fan_equations = []
     fans = []
@@ -418,31 +428,46 @@ def L1_shock_curves(rho_in, D1, start_list, end_list, t_RL_interval_1, t_max_lim
 
 def find_intercept(m, c, coords, t_min):
     """Returns the first (t, x) intercept with a curve after t_min."""
-    for k in range(len(coords) - (1 if len(coords[0]) == 2 else 0)):
-        # If the input is a list of points [x, t] (2 values)
-        if len(coords[k]) == 2:
-            x1, t1 = coords[k]
-            x2, t2 = coords[k+1]
-        
-        # If the input is a list of segments [m, t1, t2, x1, x2] (5 values)
-        # This matches your variable_shockwave output!
-        elif len(coords[k]) == 5:
-            _, t1, t2, x1, x2 = coords[k]
-        
-        else:
-            continue
+    if coords is None or len(coords) == 0:
+        return None, None
 
-        vs = (x2 - x1) / (t2 - t1) if abs(t2 - t1) > 1e-6 else 0
-        denom = (1.0/m - vs)
-        
-        if abs(denom) > 1e-9:
-            t_int = (x1 - vs*t1 + c/m) / denom
-            
-            # Use the min/max of the segment time bounds
+    if len(coords[0]) == 2:
+        for k in range(len(coords) - 1):
+            x1, t1 = coords[k]
+            x2, t2 = coords[k + 1]
+
+            if abs(t2 - t1) < 1e-6:
+                continue
+
+            vs = (x2 - x1) / (t2 - t1)
+            denom = (1.0 / m - vs)
+
+            if abs(denom) < 1e-9:
+                continue
+
+            t_int = (x1 - vs * t1 + c / m) / denom
             if min(t1, t2) <= t_int <= max(t1, t2) and t_int >= t_min:
                 x_int = (t_int - c) / m
                 return t_int, x_int
-                
+
+    elif len(coords[0]) == 5:
+        for k in range(len(coords)):
+            _, t1, t2, x1, x2 = coords[k]
+
+            if abs(t2 - t1) < 1e-6:
+                continue
+
+            vs = (x2 - x1) / (t2 - t1)
+            denom = (1.0 / m - vs)
+
+            if abs(denom) < 1e-9:
+                continue
+
+            t_int = (x1 - vs * t1 + c / m) / denom
+            if min(t1, t2) <= t_int <= max(t1, t2) and t_int >= t_min:
+                x_int = (t_int - c) / m
+                return t_int, x_int
+
     return None, None
 
 def get_finite_fan_segments(fans_raw, light_1_shock_wave_front, position_of_1, position_of_2,timings_of_1,light_2_shock_wave_front, dissipation_front):
@@ -513,14 +538,15 @@ def get_finite_fan_segments(fans_raw, light_1_shock_wave_front, position_of_1, p
                     if check_idx < 0: continue
                     
                     # Check L2 Shockwave for this cycle
-                    if check_idx < len(light_2_shock_wave_front):
+                    if check_idx < len(light_2_shock_wave_front) and len(light_2_shock_wave_front[check_idx]) > 0:
                         t_hit_s, x_hit_s = find_intercept(m, c, light_2_shock_wave_front[check_idx], t_base_start)
-                        if t_hit_s: possible_hits.append((t_hit_s, x_hit_s))
+                        if t_hit_s is not None:
+                            possible_hits.append((t_hit_s, x_hit_s))
 
-                    # Check L2 Dissipation for this cycle
-                    if check_idx < len(dissipation_front):
+                    if check_idx < len(dissipation_front) and len(dissipation_front[check_idx]) > 0:
                         t_hit_d, x_hit_d = find_intercept(m, c, dissipation_front[check_idx], t_base_start)
-                        if t_hit_d: possible_hits.append((t_hit_d, x_hit_d))
+                        if t_hit_d is not None:
+                            possible_hits.append((t_hit_d, x_hit_d))
 
                 # 3. Decision Logic: Find the earliest hit across ALL checked cycles
                 if possible_hits:
@@ -565,64 +591,44 @@ def find_line_intersection(m1, c1, line2):
 
 def get_finite_fan_segments_L2(fans_raw_L2, light_2_shock_wave_front, position_of_2, position_of_3, 
                                timings_of_2, dissipation_front_L2, finite_fans_L1):
-    """
-    Specifically for L2: Clips fan arms based on the next red light (L2 shock/dissipation)
-    and intersections with incoming L1 plumes.
-    """
     finite_fans_L2 = []
     
     for i, cycle_equations in enumerate(fans_raw_L2):
-        if i >= len(light_2_shock_wave_front): break
-        
-        # The 'red boundaries' for this L2 cycle
-        shock_coords = light_2_shock_wave_front[i]
         cycle_segments = []
+        t_start_green = timings_of_2[i]
         
+        # Guard against index errors if simulation ends early
+        shock_coords = light_2_shock_wave_front[i] if i < len(light_2_shock_wave_front) else []
+        diss_coords = dissipation_front_L2[i] if i < len(dissipation_front_L2) else []
+
         for m, c in cycle_equations:
-            # 1. DEFAULT START: The Light 2 position
-            x_start, t_start = position_of_2, timings_of_2[i]
-            
-            # 2. FIND THE END: Where the car hits a boundary
-            # Default to some world boundary (position_of_3)
-            x_end = position_of_3
-            t_end = (m * x_end) + c
-            
+            t_start, x_start = t_start_green, position_of_2
             possible_hits = []
 
-            # --- Check A: Hit the L2 Shockwave (the back of the current queue) ---
-            t_hit_s, x_hit_s = find_intercept(m, c, shock_coords, t_start)
-            if t_hit_s: possible_hits.append((t_hit_s, x_hit_s))
+            # 1. Check for future red light queue
+            if len(shock_coords) > 0:
+                res_s_t, res_s_x = find_intercept(m, c, shock_coords, t_start)
+                if res_s_t is not None:
+                    possible_hits.append((res_s_t, res_s_x))
 
-            # --- Check B: Hit the L2 Dissipation (the front of the current queue) ---
-            if i < len(dissipation_front_L2):
-                t_hit_d, x_hit_d = find_intercept(m, c, dissipation_front_L2[i], t_start)
-                if t_hit_d: possible_hits.append((t_hit_d, x_hit_d))
+            # 2. Check for future dissipation
+            if len(diss_coords) > 0:
+                res_d_t, res_d_x = find_intercept(m, c, diss_coords, t_start)
+                if res_d_t is not None:
+                    possible_hits.append((res_d_t, res_d_x))
 
-            # --- Check C: Interaction with L1 Fan Arms (The Plume) ---
-            # This handles where the release wave from L2 meets the plume arriving from L1
-            for cycle_l1 in finite_fans_L1:
-                for arm_l1 in cycle_l1:
-                    # arm_l1 format: [x1, t1, x2, t2]
-                    # We treat L1 arms as moving boundaries
-                    t_hit_l1, x_hit_l1 = find_line_intersection(m, c, arm_l1)
-                    if t_hit_l1 and t_hit_l1 > t_start:
-                        possible_hits.append((t_hit_l1, x_hit_l1))
-
-            # 3. Decision Logic: Closest impact wins
+            # 3. Final Boundary Logic
             if possible_hits:
-                possible_hits.sort()
+                possible_hits.sort(key=lambda x: x[0])
                 t_end, x_end = possible_hits[0]
+            else:
+                # Horizon: Car drives 500m past Light 2 into free road
+                x_end = position_of_2 + (500 / 13.4) 
+                t_end = m * x_end + c
 
-            # 4. Handle Slope Direction
-            if m > 0:
-                # Standard release: Start at light, end at first obstruction
-                cycle_segments.append([x_start, t_start, x_end, t_end])
-            elif m < 0:
-                # Backward moving waves (Shockwaves within the fan itself)
-                cycle_segments.append([x_end, t_end, x_start, t_start])
-                
+            cycle_segments.append([x_start, t_start, x_end, t_end])
+            
         finite_fans_L2.append(cycle_segments)
-    
     return finite_fans_L2
 
 def get_release_time(x_car, dissipation_curves):
@@ -645,38 +651,53 @@ def get_release_time(x_car, dissipation_curves):
             return t_release
             
     return None
+
 def find_intercept_single(v_veh, x_start, t_start, shock_list):
     """
     Standardized intersection: only looks for hits in the FUTURE.
     """
     hits = []
-    for cycle in shock_list:
-        for j in range(len(cycle) - 1 if len(cycle[0]) == 2 else len(cycle)):
-            seg = cycle[j]
-            if len(seg) == 5:
-                _, t1, t2, x1, x2 = seg
-            else:
-                x1, t1 = cycle[j]; x2, t2 = cycle[j+1]
-            
-            # --- CRITICAL: Skip cycles that ended before our current time ---
-            if max(t1, t2) < t_start: continue 
 
-            if abs(t2 - t1) < 1e-6: continue
+    for cycle in shock_list:
+        if cycle is None or len(cycle) == 0:
+            continue
+
+        is_point_list = len(cycle[0]) == 2
+
+        if is_point_list:
+            loop_range = range(len(cycle) - 1)
+        else:
+            loop_range = range(len(cycle))
+
+        for j in loop_range:
+            if is_point_list:
+                x1, t1 = cycle[j]
+                x2, t2 = cycle[j + 1]
+            else:
+                _, t1, t2, x1, x2 = cycle[j]
+
+            if max(t1, t2) < t_start:
+                continue
+
+            if abs(t2 - t1) < 1e-6:
+                continue
+
             v_s = (x2 - x1) / (t2 - t1)
-            
             denom = (v_veh - v_s)
-            if abs(denom) < 1e-9: continue 
-            
-            t_int = (x1 - v_s*t1 - x_start + v_veh*t_start) / denom
-            
-            # Intersection must be within segment AND in the car's future
+
+            if abs(denom) < 1e-9:
+                continue
+
+            t_int = (x1 - v_s * t1 - x_start + v_veh * t_start) / denom
+
             if min(t1, t2) <= t_int <= max(t1, t2) and t_int > t_start + 0.05:
                 x_int = x_start + v_veh * (t_int - t_start)
                 hits.append((t_int, x_int))
-                
+
     if hits:
-        hits.sort() # Get the SOONEST future hit
-        return hits[0] 
+        hits.sort()
+        return hits[0]
+
     return None, None
 
 def get_active_tg(curr_t, green_starts):
@@ -746,7 +767,7 @@ def find_intercept_all_cycles(v_car, x0, t0, all_shocks):
                         
     return (best_t, best_x) if best_t != float('inf') else (None, None)
 
-def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g_starts_1, g_starts_2, r_starts_1, r_starts_2, V_MAX_REAL):
+def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g_starts_1, g_starts_2, r_starts_1, r_starts_2, V_MAX_REAL,dt=0.2):
     curr_x, curr_t = 0.0, t_start
     path = [[curr_x, curr_t]]
     is_stopped = False
@@ -766,7 +787,7 @@ def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g
 
         # --- 2. THE INTERACTION LOOP (High Detail) ---
         # We only run a high-detail loop when we are actually near the light/queue
-        dt = 0.5 
+        dt = 0.1 
         while curr_x < (pos + 10) and curr_t < 700:
             # A. IF STOPPED: Wait for Green Fan
             if is_stopped:
