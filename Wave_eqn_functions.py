@@ -767,7 +767,11 @@ def find_intercept_all_cycles(v_car, x0, t0, all_shocks):
                         
     return (best_t, best_x) if best_t != float('inf') else (None, None)
 
+<<<<<<< HEAD
 def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g_starts_1, g_starts_2, r_starts_1, r_starts_2, V_MAX_REAL,dt=0.2):
+=======
+def track_vehicle_full_physics(t_start, v_in_norm, D1, D2, shock_L1, shock_L2, g_starts_1, g_starts_2, r_starts_1, r_starts_2, V_MAX_REAL,dt=0.1):
+>>>>>>> 8e060bd2c3725c23ffd1f81966126804c873be52
     curr_x, curr_t = 0.0, t_start
     path = [[curr_x, curr_t]]
     is_stopped = False

@@ -1,0 +1,105 @@
+[33mcommit 071b8a876de51c3248affa0ca74091c99cac8f80[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Tue Mar 24 22:22:46 2026 +0000
+
+    best tracking system right now i have
+
+[33mcommit f4b059369fb8b2065b4c16cc2b0974c1b349fbc1[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Tue Mar 24 21:33:55 2026 +0000
+
+    attempting car tracking, otherwise base modelling is done
+
+[33mcommit d8c91de9a385855844b9bdc250a39b0c9cad8ce0[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Tue Mar 24 14:18:40 2026 +0000
+
+    updated functions and plotting
+
+[33mcommit 51bd2a91df47f50594d65dd43570a7029d2bea94[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Mon Mar 23 21:32:14 2026 +0000
+
+    edited back end functions, should hopefully work now but the inputs have changed. I have done my best and I think it works fine. it is currently 21:30. the best I can do is this. also there is an AI plotting thingy for HArry to use
+
+[33mcommit 9d5e2673402746fba910645ab18a08a7bf64725f[m
+Author: Harry-Edney <harryedney25@gmail.com>
+Date:   Sun Mar 22 23:16:38 2026 +0000
+
+    Start of new plots with new backend equations
+    
+    super rough right now, but its a start to using the new functions. Check the output and change anything you want. I did try to get variable_shockwave to work but couldnt, thats what ill be trying from now.
+
+[33mcommit 2de01fa823bac9f547021c42bcd1d120a61066be[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Sun Mar 22 20:06:30 2026 +0000
+
+    I have edited the plotting file so its clearer how to use the functions which I have changed and commented as best as I can for now
+
+[33mcommit 3f5df1d5831266faad2f6a7d8daf2de2fe586cee[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Fri Mar 20 15:25:45 2026 +0000
+
+    I have created a work in progress set of functions to model the shockwave as a function of density etc as discussed. In also have started a main code file, it is rough so feel free to change
+
+[33mcommit e144f5a0f9043a6dbd849ba957682e19ed18ca16[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Thu Mar 19 12:42:09 2026 +0000
+
+    new file for week7 progress
+
+[33mcommit e9c6fae23ce57b1a9eec0467cfaef2c7cebcf78e[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Wed Mar 18 16:50:02 2026 +0000
+
+    added some graphs and description to explain the scenario and model me and Harry came up with.
+
+[33mcommit d7c2082f19efce89033d620aeceb93a87cfc3def[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Mon Mar 16 16:52:17 2026 +0000
+
+    Added a markdown explaining the maths I did as best as I can. Also includes discussion on whether to use a numerical or algebraic method to solve the intercept problem.
+
+[33mcommit 8cf5311a6981e38bd399c9518cf41a7fa631382a[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Mon Mar 16 11:01:37 2026 +0000
+
+    added some code gemini helped me make to plot the flow of traffic from the beginning of a red light and after the green wave and shock wave combine
+
+[33mcommit cb335af4dc553398b8f9a793042b24dc89967f21[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Sat Mar 14 19:29:46 2026 +0000
+
+    added some comments to the test folder, not necessarily correct so feel free to edit.
+
+[33mcommit e0f13899b3f94ce4f64883ab37007e24a11e0676[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Sat Mar 14 14:54:22 2026 +0000
+
+    corrected  LWR test, code now works and produces graphs. Matplotlib notebook is not matplotlib inline to fix graphs issue
+
+[33mcommit e130d0fd990205b0de3e57ce5c8a96e92574e5f7[m
+Author: caspar clyde <casparclyde07@gmail.com>
+Date:   Sat Mar 14 13:20:23 2026 +0000
+
+    Added the repo with the predefined py functions for use in modelling and a document explaijning how to create a suitable venv in vscode
+
+[33mcommit d0919c66f0217877fc9f939e88cd1dcc8c30facd[m
+Author: Javed Ahmed Akram <ja9611705@gmail.com>
+Date:   Tue Mar 10 13:20:18 2026 +0000
+
+    Update README.md
+
+[33mcommit 70e76a7bea6aa0b5ab3e763fdd4613361e2af2f9[m
+Author: Javed Ahmed Akram <ja9611705@gmail.com>
+Date:   Tue Mar 10 13:14:10 2026 +0000
+
+    Basic map creation
+    
+    Edit locations and distances as you wish
+
+[33mcommit f7bed3698baf3b7349de46085ad8ffb26e54a694[m
+Author: Javed Ahmed Akram <ja9611705@gmail.com>
+Date:   Tue Mar 10 11:58:55 2026 +0000
+
+    Initial commit
